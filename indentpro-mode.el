@@ -29,7 +29,9 @@
 
 ;;; Installation:
 
-;; Install `company-mode' and add this file to `load-path'.  Then either compile/create autoloads and load autoloads files, or require the file in your init file.
+;; Install `company-mode' and add this file to `load-path'.
+;; Then either compile/create autoloads and load autoloads files,
+;; or require the file in your init file:
 
 ;; ```lisp
 ;; (require 'indentpro-mode)
@@ -58,7 +60,7 @@
 ;; ------------------------------------------------------------
 ;;* Completion
 (defvar company-indentpro-modes '(indentpro-mode))
-(defvar company-indentpro-candidates nil)
+(defvar company-indentpro-candidates-list nil)
 
 (defun company-indentpro-build ()
   "Build candidate list."
@@ -71,28 +73,40 @@
       (while (looking-at-p "\\s-")
         (if 
             (re-search-forward
-             "\\s-+\\(-[A-Za-z]+\\),?\\s-*\\(-[-A-Za-z]+\\)?"
+             "\\s-+\\(-[A-Za-z]+\\),?\\s-*\\([-A-Za-z]+\\)?"
              (line-end-position) t)
             (progn
               (setq short (match-string-no-properties 1))
-              (setq long (match-string-no-properties 2))
-              (forward-line 1)
-              (goto-char (line-beginning-position))
-              (re-search-forward "\\s-+\\(.*\\)$" (line-end-position) t)
-              (when long
-                (set-text-properties 0 1
-                                     `(annot
-                                       ,temp
-                                       meta
-                                       ,(match-string-no-properties 1))
-                                     long)
-                (push long res))
-              (put-text-property 0 1 'meta
-                                 (match-string-no-properties 1) short)
-              (push short res))
-          (forward-line 1))))
-    (setq company-indentpro-candidates res)
-    res))
+              (when (match-string-no-properties 2)
+                (if (eq ?- (aref 0 (match-string-no-properties 2)))
+                    (progn
+                      (setq long (match-string-no-properties 2))
+                      (put-text-property
+                       0 1 'annot
+                       (match-string-no-properties 1) long)
+                      (put-text-property
+                       0 1 'annot
+                       (match-string-no-properties 2) short)
+                      (forward-line 1)
+                      (goto-char (line-beginning-position))
+                      (re-search-forward "\\s-+\\(.*\\)$"
+                                         (line-end-position) t)
+                      (when long
+                        (put-text-property
+                         0 1 'meta
+                         (match-string-no-properties 1) long)
+                        (push long res)
+                        (setq long nil))
+                      (put-text-property
+                       0 1 'meta
+                       (match-string-no-properties 1) short)
+                      (push short res))
+                  (put-text-property
+                   0 1 'meta
+                   (match-string-no-properties 2) short)))))
+        (forward-line 1))))
+  (setq company-indentpro-candidates res)
+  res)
 
 (company-indentpro-build)
 (sort company-indentpro-candidates 'string<)
