@@ -2,9 +2,11 @@
 
 ;; Author: Noah Peart <noah.v.peart@gmail.com>
 ;; URL: https://github.com/nverno/company-indent-pro
-;; Package-Requires ((company "0.8.0") (cl-lib "0.5.0"))
+;; Package-Requires:
 ;; Copyright (C) 2016, Noah Peart, all rights reserved.
 ;; Created:  5 August 2016
+
+;;; Commentary:
 
 ;; This file is not part of GNU Emacs.
 ;;
@@ -23,127 +25,99 @@
 ;; the Free Software Foundation, Inc., 51 Franklin Street, Fifth
 ;; Floor, Boston, MA 02110-1301, USA.
 
-;;; Commentary:
+;; Description:
 
-;; Emacs mode and autocompletion backend (using `company-mode') for .indent.pro files.
+;; Simple emacs major mode for editing .indent.pro files.  Mostly, just
+;; an interface to autocompletion, because there are too many acrynyms
+;; to remember, completion support can be found at
+;; [company-indentpro](https://github.com/nverno/company-indentpro).
+;;
+;; It also adds font-locking and c/c++ comment syntax.
 
-;;; Installation:
+;; Installation:
 
-;; Install `company-mode' and add this file to `load-path'.
-;; Then either compile/create autoloads and load autoloads files,
-;; or require the file in your init file:
+;; Just add this file to `load-path' and require it or compile and
+;; make autoloads, then load the autoloads files in your init file.
+;; The simple way:
 
 ;; ```lisp
 ;; (require 'indentpro-mode)
-
-;; ;; Add a hook to use company-completion
-;; (add-hook 'indentpro-mode-hook
-;;           #'(lambda ()
-;;               (set (make-local-variable 'company-backends)
-;;                    '(company-indentpro))))
 ;; ```
 
 ;;; Code:
 
-(require 'company)
+(defvar company-backends)
+(autoload 'company-indentpro "company-indentpro")
+
+(defgroup indentpro nil
+  "Emacs major mode for .indent.pro files."
+  :group 'languages)
+
+;; ------------------------------------------------------------
+;;* User Variables
+(defcustom indentpro-use-company (featurep 'company)
+  "Use company completion backend.  When true, pushes
+ `company-indentpro' to local `company-backends'."
+  :group 'indentpro
+  :type 'boolean)
+
+(defface indentpro-keywords-face
+  '((t :inherit font-lock-type-face))
+  "Face for options.")
+
+;; ------------------------------------------------------------
+;;* Internal
+(defvar indentpro-common-styles
+  '((gnu "-nbad" "-bap" "-nbc" "-bbo" "-bl" "-bli2" "-bls" "-ncdb" "-nce"
+         "-cp1" "-cs" "-di2 -ndj" "-nfc1" "-nfca" "-hnl" "-i2" "-ip5"
+         "-lp"
+         "-pcs" "-nprs" "-psl" "-saf" "-sai" "-saw" "-nsc" "-nsob")
+    (k&r "-nbad" "-bap" "-bbo" "-nbc" "-br" "-brs" "-c33" "-cd33" "-ncdb"
+         "-ce" "-ci4" "-cli0" "-cp33" "-cs" "-d0" "-di1" "-nfc1" "-nfca"
+         "-hnl" "-i4" "-ip0" "-l75" "-lp" "-npcs" "-nprs" "-npsl" "-saf"
+         "-sai" "-saw" "-nsc" "-nsob" "-nss")
+    (berkeley "-nbad" "-nbap" "-bbo" "-bc" "-br" "-brs" "-c33" "-cd33"
+              "-cdb" "-ce" "-ci4" "-cli0" "-cp33" "-di16" "-fc1" "-fca"
+              "-hnl" "-i4" "-ip4" "-l75" "-lp" "-npcs" "-nprs" "-psl"
+              "-saf" "-sai" "-saw" "-sc" "-nsob" "-nss" "-ts8")
+    (linux "-nbad" "-bap" "-nbc" "-bbo" "-hnl" "-br" "-brs" "-c33"
+           "-cd33" "-ncdb" "-ce" "-ci4" "-cli0" "-d0" "-di1" "-nfc1"
+           "-i8" "-ip0" "-l80" "-lp" "-npcs" "-nprs" "-npsl" "-sai"
+           "-saf" "-saw" "-ncs" "-nsc" "-sob" "-nfca" "-cp33" "-ss"
+           "-ts8" "-il1")))
+
+(defvar indentpro-font-lock-keywords
+  '(("^-[-A-Za-z0-9]+" . 'indentpro-keywords-face)))
 
 ;; ------------------------------------------------------------
 ;;* Mode
 
+;;** Syntax / for c/c++ style comments
+(defvar indentpro-mode-syntax-table
+  (let ((st (make-syntax-table)))
+    (modify-syntax-entry ?\* ". 23" st)
+    (modify-syntax-entry ?/ ". 124b" st)
+    (modify-syntax-entry ?\n "> b" st)
+    st)
+  "Sytax for `indentpro-mode'.")
+
 ;;;###autoload
 (define-derived-mode indentpro-mode conf-mode "Indent Pro"
-  "Major mode for .indent.pro files.\n")
+  "Major mode for .indent.pro files.\n"
+  (setq-local comment-start "/* ")
+  (setq-local comment-start-skip "\\(//+\\|/\\*+\\)\\s *")
+  (setq-local comment-end " */")
+  (setq-local font-lock-defaults `(indentpro-font-lock-keywords))
+  
+  ;; Enable company-indentpro backend
+  (when (and (featurep 'company)
+             (featurep 'company-indentpro)
+             indentpro-use-company)
+    (make-local-variable 'company-backends)
+    (push 'company-indentpro company-backends)))
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.indent\\.pro\\'" . indentpro-mode))
-
-;; ------------------------------------------------------------
-;;* Completion
-(defvar company-indentpro-modes '(indentpro-mode))
-(defvar company-indentpro-candidates-list nil)
-
-(defun company-indentpro-build ()
-  "Build candidate list."
-  (let (res short long)
-    (with-temp-buffer
-      (call-process "man" nil t nil "indent")
-      (goto-char (point-min))
-      (re-search-forward "^OPTIONS")
-      (forward-line 1)
-      (while (looking-at-p "\\s-")
-        (if 
-            (re-search-forward
-             "\\s-+\\(-[A-Za-z]+\\),?\\s-*\\([-A-Za-z]+\\)?"
-             (line-end-position) t)
-            (progn
-              (setq short (match-string-no-properties 1))
-              (when (match-string-no-properties 2)
-                (if (eq ?- (aref 0 (match-string-no-properties 2)))
-                    (progn
-                      (setq long (match-string-no-properties 2))
-                      (put-text-property
-                       0 1 'annot
-                       (match-string-no-properties 1) long)
-                      (put-text-property
-                       0 1 'annot
-                       (match-string-no-properties 2) short)
-                      (forward-line 1)
-                      (goto-char (line-beginning-position))
-                      (re-search-forward "\\s-+\\(.*\\)$"
-                                         (line-end-position) t)
-                      (when long
-                        (put-text-property
-                         0 1 'meta
-                         (match-string-no-properties 1) long)
-                        (push long res)
-                        (setq long nil))
-                      (put-text-property
-                       0 1 'meta
-                       (match-string-no-properties 1) short)
-                      (push short res))
-                  (put-text-property
-                   0 1 'meta
-                   (match-string-no-properties 2) short)))))
-        (forward-line 1))))
-  (setq company-indentpro-candidates res)
-  res)
-
-(company-indentpro-build)
-(sort company-indentpro-candidates 'string<)
-
-(defun company-indentpro-prefix ()
-  (and (derived-mode-p major-mode company-indentpro-modes)
-       (not (company-in-string-or-comment))
-       (company-grab-symbol)))
-
-(defun company-indentpro-meta (candidate)
-  (get-text-property 0 'meta candidate))
-
-(defun company-indentpro-doc (candidate)
-  (with-temp-buffer
-    (call-process "man" nil t nil "indent")
-    (goto-char (point-min))
-    (company-doc-buffer
-     (buffer-substring-no-properties (line-beginning-position)
-                                     (point-max))))
-  (get-buffer "*company-documentation*")
-  (goto-char (search-forward candidate)))
-
-(defun company-indentpro-annotation (arg))
-(defun company-indentpro-candidates ())
-
-;;;###autoload
-(defun company-indentpro (command &optional arg &rest _args)
-  "Indent pro backend for `company-mode'."
-  (interactive (list 'interactive))
-  (cl-case command
-    (interactive (company-begin-backend 'company-indentpro))
-    (prefix (company-indentpro-prefix))
-    (annotation (company-indentpro-annotation arg))
-    (meta (company-indentpro-meta arg))
-    (doc-buffer (company-indentpro-doc arg))
-    (sorted t)
-    (candidates ())))
 
 (provide 'indentpro-mode)
 
